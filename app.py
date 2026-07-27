@@ -34,9 +34,15 @@ def format_inr(value):
 @st.cache_data(ttl=300)
 def fetch_board_data(token, board_id):
     """Fetches and flattens board data from Monday.com GraphQL API safely."""
-    if not token or not board_id: return pd.DataFrame()
+    if not token or not board_id: 
+        return pd.DataFrame()
+        
     url = "https://api.monday.com/v2"
-    headers = {"Authorization": token, "API-Version": "2024-01", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": str(token).strip(), 
+        "API-Version": "2024-01", 
+        "Content-Type": "application/json"
+    }
     
     clean_board_id = str(board_id).strip()
     query = f"query {{ boards(ids: [{clean_board_id}]) {{ items_page(limit: 500) {{ items {{ name column_values {{ column {{ title }} text }} }} }} }} }}"
@@ -44,42 +50,61 @@ def fetch_board_data(token, board_id):
     try:
         response = requests.post(url, json={'query': query}, headers=headers, timeout=15)
         
-        # Safely parse JSON
+        # 1. Guard against non-200 HTTP responses (e.g. 401 Unauthorized, 502 Bad Gateway)
+        if response.status_code != 200:
+            st.error(f"Monday API HTTP Error {response.status_code}: {response.text[:300]}")
+            return pd.DataFrame()
+            
+        # 2. Safely parse JSON response
         try:
             res_json = response.json()
-        except Exception:
-            st.error(f"Monday API returned non-JSON response: {response.text[:200]}")
+        except ValueError:
+            st.error(f"Monday API returned invalid JSON/Text: {response.text[:300]}")
             return pd.DataFrame()
             
+        # 3. Ensure the response is actually a dictionary before using .get()
         if not isinstance(res_json, dict):
-            st.error(f"Unexpected API response type: {type(res_json)}")
+            st.error(f"Unexpected API response format (expected dictionary, got {type(res_json)})")
             return pd.DataFrame()
             
+        # 4. Check for GraphQL syntax or authorization errors
         if 'errors' in res_json:
-            st.error(f"Monday API Error: {res_json['errors'][0].get('message', 'Unknown error')}")
+            err_msg = res_json['errors'][0].get('message', 'Unknown GraphQL error') if isinstance(res_json['errors'], list) else str(res_json['errors'])
+            st.error(f"Monday GraphQL Error: {err_msg}")
             return pd.DataFrame()
             
-        if 'data' not in res_json or not res_json['data'] or not res_json['data'].get('boards'):
-            st.error(f"Invalid API Response structure. Check Board ID: {clean_board_id}")
+        # 5. Extract board data safely
+        data_block = res_json.get('data')
+        if not isinstance(data_block, dict) or not data_block.get('boards'):
+            st.error(f"Invalid API Response structure. Please verify Board ID: {clean_board_id}")
             return pd.DataFrame()
             
-        boards_data = res_json['data']['boards']
+        boards_data = data_block['boards']
         if not boards_data or not boards_data[0]:
             return pd.DataFrame()
             
-        items = boards_data[0].get('items_page', {}).get('items', [])
+        items_page = boards_data[0].get('items_page', {})
+        items = items_page.get('items', []) if isinstance(items_page, dict) else []
+        
         rows = []
         for item in items:
+            if not isinstance(item, dict):
+                continue
             row_dict = {"Item Name": item.get('name', 'Unnamed')}
-            for cv in item.get('column_values', []):
-                col_dict = cv.get('column')
-                col_title = col_dict.get('title', 'Unknown') if isinstance(col_dict, dict) else 'Unknown'
-                row_dict[col_title] = cv.get('text', '')
+            column_values = item.get('column_values', [])
+            if isinstance(column_values, list):
+                for cv in column_values:
+                    if not isinstance(cv, dict):
+                        continue
+                    col_dict = cv.get('column')
+                    col_title = col_dict.get('title', 'Unknown') if isinstance(col_dict, dict) else 'Unknown'
+                    row_dict[col_title] = cv.get('text', '')
             rows.append(row_dict)
             
         return pd.DataFrame(rows)
+        
     except Exception as e:
-        st.error(f"Connection Error: {str(e)}")
+        st.error(f"Connection Exception: {str(e)}")
         return pd.DataFrame()
 def clean_enterprise_data(df):
     """Deep cleans messy live data using vectorization and regex."""

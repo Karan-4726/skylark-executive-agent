@@ -33,25 +33,45 @@ def format_inr(value):
 
 @st.cache_data(ttl=300)
 def fetch_board_data(token, board_id):
-    """Fetches and flattens board data from Monday.com GraphQL API dynamically"""
+    """Fetches and flattens board data from Monday.com GraphQL API safely."""
     if not token or not board_id: return pd.DataFrame()
     url = "https://api.monday.com/v2"
     headers = {"Authorization": token, "API-Version": "2024-01", "Content-Type": "application/json"}
-    query = f"query {{ boards(ids: {board_id}) {{ items_page(limit: 500) {{ items {{ name column_values {{ column {{ title }} text }} }} }} }} }}"
+    
+    # Ensure board_id is clean string integer
+    clean_board_id = str(board_id).strip()
+    query = f"query {{ boards(ids: [{clean_board_id}]) {{ items_page(limit: 500) {{ items {{ name column_values {{ column {{ title }} text }} }} }} }} }}"
     
     try:
         response = requests.post(url, json={'query': query}, headers=headers, timeout=15)
-        items = response.json()['data']['boards'][0]['items_page']['items']
+        res_json = response.json()
+        
+        # Check if Monday.com returned a GraphQL error (like invalid token or board not found)
+        if 'errors' in res_json:
+            st.error(f"Monday API Error: {res_json['errors'][0].get('message', 'Unknown error')}")
+            return pd.DataFrame()
+            
+        if 'data' not in res_json or not res_json['data'].get('boards'):
+            st.error(f"Invalid API Response structure. Check Board ID: {clean_board_id}")
+            return pd.DataFrame()
+            
+        boards_data = res_json['data']['boards']
+        if not boards_data or not boards_data[0]:
+            return pd.DataFrame()
+            
+        items = boards_data[0].get('items_page', {}).get('items', [])
         rows = []
         for item in items:
-            row_dict = {"Item Name": item['name']}
-            for cv in item['column_values']: row_dict[cv['column']['title']] = cv['text']
+            row_dict = {"Item Name": item.get('name', 'Unnamed')}
+            for cv in item.get('column_values', []):
+                col_title = cv.get('column', {}).get('title', 'Unknown')
+                row_dict[col_title] = cv.get('text', '')
             rows.append(row_dict)
+            
         return pd.DataFrame(rows)
     except Exception as e:
-        st.error(f"Error fetching data: {str(e)}")
+        st.error(f"Connection Error: {str(e)}")
         return pd.DataFrame()
-
 def clean_enterprise_data(df):
     """Deep cleans messy live data using vectorization and regex."""
     if df.empty: return df

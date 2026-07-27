@@ -38,20 +38,28 @@ def fetch_board_data(token, board_id):
     url = "https://api.monday.com/v2"
     headers = {"Authorization": token, "API-Version": "2024-01", "Content-Type": "application/json"}
     
-    # Ensure board_id is clean string integer
     clean_board_id = str(board_id).strip()
     query = f"query {{ boards(ids: [{clean_board_id}]) {{ items_page(limit: 500) {{ items {{ name column_values {{ column {{ title }} text }} }} }} }} }}"
     
     try:
         response = requests.post(url, json={'query': query}, headers=headers, timeout=15)
-        res_json = response.json()
         
-        # Check if Monday.com returned a GraphQL error (like invalid token or board not found)
+        # Safely parse JSON
+        try:
+            res_json = response.json()
+        except Exception:
+            st.error(f"Monday API returned non-JSON response: {response.text[:200]}")
+            return pd.DataFrame()
+            
+        if not isinstance(res_json, dict):
+            st.error(f"Unexpected API response type: {type(res_json)}")
+            return pd.DataFrame()
+            
         if 'errors' in res_json:
             st.error(f"Monday API Error: {res_json['errors'][0].get('message', 'Unknown error')}")
             return pd.DataFrame()
             
-        if 'data' not in res_json or not res_json['data'].get('boards'):
+        if 'data' not in res_json or not res_json['data'] or not res_json['data'].get('boards'):
             st.error(f"Invalid API Response structure. Check Board ID: {clean_board_id}")
             return pd.DataFrame()
             
@@ -64,7 +72,8 @@ def fetch_board_data(token, board_id):
         for item in items:
             row_dict = {"Item Name": item.get('name', 'Unnamed')}
             for cv in item.get('column_values', []):
-                col_title = cv.get('column', {}).get('title', 'Unknown')
+                col_dict = cv.get('column')
+                col_title = col_dict.get('title', 'Unknown') if isinstance(col_dict, dict) else 'Unknown'
                 row_dict[col_title] = cv.get('text', '')
             rows.append(row_dict)
             

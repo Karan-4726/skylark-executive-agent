@@ -70,21 +70,28 @@ def clean_enterprise_data(df):
     return df
 
 # ---------------------------------------------------------
-# 3. SIDEBAR CREDENTIALS
+# 3. AUTOMATED SECRETS LOADING (St.Secrets Integration)
 # ---------------------------------------------------------
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/3063/3063822.png", width=60)
-st.sidebar.title("🛸 System Config")
-monday_token = st.sidebar.text_input("Monday.com API Token", type="password")
-deals_board_id = st.sidebar.text_input("Deals Board ID")
-wo_board_id = st.sidebar.text_input("Work Orders Board ID")
-gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
+st.sidebar.title("🛸 System Hub")
+st.sidebar.success("Connected to Cloud Secrets Securely")
+
+try:
+    monday_token = st.secrets["MONDAY_TOKEN"]
+    deals_board_id = st.secrets["DEALS_BOARD_ID"]
+    wo_board_id = st.secrets["WO_BOARD_ID"]
+    gemini_key = st.secrets["GEMINI_KEY"]
+except Exception:
+    monday_token = None
+    deals_board_id = None
+    wo_board_id = None
+    gemini_key = None
 
 st.markdown('<div class="main-header">🛸 Skylark Drones | Executive Agent Hub</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">Automated Cross-Board Reconciliation & Strategic Intelligence</div>', unsafe_allow_html=True)
 
 if not (monday_token and deals_board_id and wo_board_id and gemini_key):
-    st.warning("👈 Please enter your 4 system keys in the sidebar to initiate the live data pipeline.")
-    st.info("**Need a free Gemini Key?** Get it instantly at [Google AI Studio](https://aistudio.google.com/app/apikey)")
+    st.error("⚠️ Missing cloud secrets. Please ensure `MONDAY_TOKEN`, `DEALS_BOARD_ID`, `WO_BOARD_ID`, and `GEMINI_KEY` are defined in your Streamlit Cloud Secrets settings.")
     st.stop()
 
 # ---------------------------------------------------------
@@ -132,7 +139,7 @@ wo_names = df_wo['Item Name'].unique() if 'Item Name' in df_wo.columns else []
 missing_wos = high_prob_deals[~high_prob_deals['Item Name'].isin(wo_names)] if not high_prob_deals.empty else pd.DataFrame()
 
 # ---------------------------------------------------------
-# 5. DASHBOARD UI & 4 VISUAL REPRESENTATIONS
+# 5. DASHBOARD UI & VISUAL REPRESENTATIONS
 # ---------------------------------------------------------
 tab_exec, tab_ai, tab_audit = st.tabs(["📊 Executive Dashboard", "🤖 Strategic AI Agent", "🛡️ Operational Audit"])
 
@@ -145,12 +152,10 @@ with tab_exec:
     
     st.divider()
     
-    # ROW 1: Funnel Chart & Donut Chart
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Active Pipeline Velocity (Excluding Dead Deals)")
         if deal_stage_col != "Item Name":
-            # Filter out 'Dead' or 'Lost' stages so the active pipeline scales properly
             active_pipeline_df = df_deals[~df_deals[deal_stage_col].str.contains('Dead|Lost', case=False, na=False)]
             stage_data = active_pipeline_df.groupby(deal_stage_col)['Numeric_Value'].sum().reset_index()
             
@@ -171,7 +176,6 @@ with tab_exec:
 
     st.divider()
 
-    # ROW 2: New Visual Representations (Sector Breakdown & Priority Breakdown)
     col3, col4 = st.columns(2)
     with col3:
         st.subheader("Revenue Concentration by Sector")
@@ -181,7 +185,6 @@ with tab_exec:
             fig3.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#F8FAFC')
             st.plotly_chart(fig3, use_container_width=True)
         else:
-            # Fallback bar chart using top items if sector column isn't mapped
             top_deals = df_deals.nlargest(10, 'Numeric_Value')
             fig3 = px.bar(top_deals, x='Item Name', y='Numeric_Value', title="Top 10 High-Value Deals", color='Numeric_Value', color_continuous_scale='Purples')
             fig3.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#F8FAFC')
